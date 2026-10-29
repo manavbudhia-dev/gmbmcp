@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business Profile Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2330;--mut:#6b7686;--bd:#e3e7ee;--ok:#1a9e5c;--bad:#d64545;--acc:#2b6cf6}
+@media(prefers-color-scheme:dark){:root{--bg:#12161d;--card:#1b212b;--fg:#e8ecf2;--mut:#93a0b3;--bd:#2a3240;--ok:#38c47c;--bad:#ef6a6a;--acc:#6b9bff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--bd);background:var(--card)}
+h1{font-size:18px;margin:0 auto 0 0}select{padding:7px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--fg)}
+main{max-width:1150px;margin:0 auto;padding:18px;display:grid;gap:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;min-width:0}
+.kpi b{display:block;font-size:26px;margin-top:4px}.kpi span,.mut{color:var(--mut);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+h2{font-size:15px;margin:0 0 8px}.chart{height:280px}
+.chk{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--bd)}.chk:first-of-type{border-top:0}
+.dot{font-weight:700;width:18px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+button{margin-left:auto;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:none;color:var(--acc);cursor:pointer;white-space:nowrap}
+.rev{padding:9px 0;border-top:1px solid var(--bd)}.badge{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--bad);color:#fff;margin-left:6px}
+#msg{display:none;padding:10px 14px;border-radius:10px;background:#fff3cd;color:#5c4400;font-size:13px;white-space:pre-wrap}
+</style></head><body>
+<header><h1>Business Profile Dashboard</h1>
+<select id="loc"></select>
+<select id="days"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="180">Last 180 days</option></select></header>
+<main>
+<div id="msg"></div>
+<div class="kpis" id="kpis"></div>
+<div class="grid">
+ <div class="card"><h2>Profile strength</h2><div id="gauge" class="chart" style="height:200px"></div><div id="checks"></div></div>
+ <div class="card"><h2>How people find you (impressions)</h2><div id="views" class="chart"></div></div>
+ <div class="card"><h2>What people do (actions)</h2><div id="actions" class="chart"></div></div>
+ <div class="card"><h2>Star ratings <span class="mut" id="rsub"></span></h2><div id="stars" class="chart" style="height:200px"></div><div id="revs"></div></div>
+</div></main>
+<script>
+const base=location.pathname.replace(/dashboard\/?$/,''),$=id=>document.getElementById(id);
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const lay=(o={})=>({paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{color:css('--fg')},
+  margin:{l:40,r:10,t:10,b:36},legend:{orientation:'h',y:-.25},...o});
+const cfg={displayModeBar:false,responsive:true};
+const _pr=Plotly.react.bind(Plotly);Plotly.react=(id,x,l,c)=>{const el=typeof id==='string'?$(id):id;if(!el._fullLayout)el.innerHTML='';return _pr(el,x,l,c)};
+async function api(p,signal){const r=await fetch(base+p,{signal}),j=await r.json().catch(()=>({error:'Server returned HTTP '+r.status}));if(j.error)throw new Error(j.error);return j}
+function msg(t){const m=$('msg');m.textContent=t||'';m.style.display=t?'block':'none'}
+const sum=(p,ks)=>ks.reduce((a,k)=>a+(p[k]||[]).reduce((x,y)=>x+y.value,0),0);
+const line=(p,k,name,color,extra={})=>({x:(p[k]||[]).map(d=>d.date),y:(p[k]||[]).map(d=>d.value),name,type:'scatter',mode:'lines',line:{color,width:2},...extra});
+function kpi(l,v,s){return `<div class="card kpi"><span>${l}</span><b>${v}</b><span>${s||''}</span></div>`}
+function render(d){
+  const c=d.completeness,r=d.reviews,p=d.performance;
+  const imp=['BUSINESS_IMPRESSIONS_DESKTOP_MAPS','BUSINESS_IMPRESSIONS_DESKTOP_SEARCH','BUSINESS_IMPRESSIONS_MOBILE_MAPS','BUSINESS_IMPRESSIONS_MOBILE_SEARCH'];
+  const act=['CALL_CLICKS','WEBSITE_CLICKS','BUSINESS_DIRECTION_REQUESTS'];
+  $('kpis').innerHTML=kpi('Profile strength',c.score+'%',c.checks.filter(x=>!x.ok).length+' to fix')
+   +kpi('Average rating',r?(typeof r.average==='number'?r.average.toFixed(1):'-')+' ★':'n/a',r?r.total+' reviews':'')
+   +kpi('Unreplied reviews',r?r.unreplied:'n/a',r?'in latest '+r.sample_size:'')
+   +kpi('Views',p?sum(p,imp).toLocaleString():'n/a','search + maps')
+   +kpi('Actions',p?sum(p,act).toLocaleString():'n/a','calls, web, directions');
+  Plotly.react('gauge',[{type:'indicator',mode:'gauge+number',value:c.score,number:{suffix:'%'},
+    gauge:{axis:{range:[0,100]},bar:{color:c.score>=80?css('--ok'):c.score>=50?'#e0a100':css('--bad')}}}],lay({margin:{l:20,r:20,t:20,b:0}}),cfg);
+  $('checks').innerHTML=c.checks.map(x=>`<div class="chk"><span class="dot ${x.ok?'ok':'bad'}">${x.ok?'✓':'✗'}</span><div>${esc(x.label)}${x.ok?'':`<div class="mut">${esc(x.tip)}</div>`}</div>${x.ok?'':`<button data-l="${esc(x.label)}">Copy fix prompt</button>`}</div>`).join('');
+  document.querySelectorAll('#checks button').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(`Using the Business Profile connector, fix this on my listing "${d.title||'(untitled)'}": ${b.dataset.l}. Show a dry_run preview first.`);b.textContent='Copied ✓'}catch{b.textContent='Copy failed'}});
+  const none=id=>{Plotly.purge($(id));$(id).innerHTML='<p class="mut">Not available (see message above).</p>'};
+  if(p){const cols=['#2b6cf6','#6fa0ff','#14a37f','#6fd1b5'],names=['Desktop · Maps','Desktop · Search','Mobile · Maps','Mobile · Search'];
+    Plotly.react('views',imp.map((k,i)=>line(p,k,names[i],cols[i],{stackgroup:'v'})),lay(),cfg);
+    Plotly.react('actions',act.map((k,i)=>line(p,k,['Calls','Website clicks','Directions'][i],['#d64545','#2b6cf6','#e0a100'][i])),lay(),cfg);
+  }else{none('views');none('actions')}
+  if(r){$('rsub').textContent='(latest '+r.sample_size+')';
+    Plotly.react('stars',[{type:'bar',orientation:'h',y:['1★','2★','3★','4★','5★'],x:[1,2,3,4,5].map(i=>r.distribution[i]),marker:{color:['#d64545','#e0742b','#e0a100','#7bbf3a','#1a9e5c']}}],lay({margin:{l:36,r:10,t:5,b:25}}),cfg);
+    $('revs').innerHTML=r.recent.map(v=>`<div class="rev"><b>${esc(v.reviewer)}</b> ${'★'.repeat(v.stars)} <span class="mut">${esc(v.date)}</span>${v.replied?'':'<span class="badge">needs reply</span>'}<div class="mut">${esc(v.comment)}</div></div>`).join('')||'<p class="mut">No reviews yet.</p>';
+  }else{none('stars');$('revs').innerHTML=''}
+  msg(Object.entries(d.errors||{}).map(([k,v])=>k+': '+v).join('\n'));
+}
+let seq=0,ctl=null,shown=null;
+function clearAll(){shown=null;$('kpis').innerHTML='';$('checks').innerHTML='';$('revs').innerHTML='';$('rsub').textContent='';
+  ['gauge','views','actions','stars'].forEach(id=>{Plotly.purge($(id));$(id).innerHTML=''})}
+async function load(){
+  ctl?.abort();ctl=new AbortController();const my=++seq;  // newest request wins; stale replies are dropped
+  const sel=$('loc').value;if(shown!==sel)clearAll();  // never show location A's numbers under location B
+  try{msg('Loading…');const [a,l]=sel.split('|');
+    const data=await api(`api/data?account=${encodeURIComponent(a)}&location=${encodeURIComponent(l)}&days=${$('days').value}`,ctl.signal);
+    if(my===seq){render(data);shown=sel}}
+  catch(e){if(e.name==='AbortError'||my!==seq)return;clearAll();msg('Could not load data: '+e.message)}
+}
+(async()=>{try{const ls=await api('api/locations');
+  $('loc').innerHTML=ls.map(x=>`<option value="${esc(x.account)}|${esc(x.location)}">${esc(x.title)}</option>`).join('');
+  $('loc').onchange=$('days').onchange=load;if(ls.length)load();else msg('No locations found on this Google account.')}
+ catch(e){msg('Could not load locations: '+e.message)}})();
+</script></body></html>
