@@ -1,0 +1,72 @@
+name: Deploy to server
+
+# main branch par har push ke baad latest code server par chala jaata hai.
+# Actions tab se "Run workflow" dabakar manually bhi chala sakte hain.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check secrets
+        id: check
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          if [ -z "$HOST" ]; then
+            echo "::warning::SERVER_HOST / SERVER_USER / SSH_PRIVATE_KEY secrets set nahi hain - deploy skip."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy over SSH
+        if: steps.check.outputs.ok == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+          BRANCH: main
+          REPO: gmbmcp
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 25m
+          envs: APP_DIR,BRANCH,REPO
+          script: |
+            set -e
+            APP_DIR="${APP_DIR:-$HOME/$REPO}"
+            # non-interactive SSH shell mein node / pm2 ka PATH load karo
+            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
+            export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "::error::$APP_DIR server par nahi mila. Ek baar clone karein: git clone https://github.com/manavbudhia-dev/$REPO.git $APP_DIR"
+              exit 1
+            fi
+            cd "$APP_DIR"
+            echo "Deploying $REPO ($BRANCH) in $APP_DIR"
+            git fetch origin "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+            # server par apna custom deploy.sh ho to wahi chalega
+            if [ -x "$APP_DIR/deploy.sh" ]; then "$APP_DIR/deploy.sh"; exit 0; fi
+            [ -d .venv ] || python3 -m venv .venv
+            .venv/bin/pip install -q -r requirements.txt
+            if systemctl cat gmbmcp >/dev/null 2>&1; then
+              sudo systemctl restart gmbmcp
+            elif pm2 describe gmbmcp >/dev/null 2>&1; then
+              pm2 restart gmbmcp --update-env
+            else
+              pm2 start .venv/bin/python --name gmbmcp --interpreter none -- server.py --http
+            fi
+            pm2 save >/dev/null 2>&1 || true
+            echo "Deploy ho gaya: $(git log -1 --format='%h %s')"
